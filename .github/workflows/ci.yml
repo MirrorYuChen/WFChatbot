@@ -13,14 +13,25 @@ jobs:
     runs-on: ubuntu-latest 
 
     steps:
+    - uses: actions/checkout@v4
+
     - name: setup
       run: |
        sudo apt-get update
-       sudo apt-get install -y cmake g++ make libssl-dev libworkflow-dev libhiredis-dev
-    - uses: actions/checkout@v4
+       sudo apt-get install -y cmake g++ make libssl-dev libhiredis-dev
+    - name: install workflow
+      run: |
+        git clone --depth 1 https://github.com/sogou/workflow.git
+        cd workflow
+        mkdir build && cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+        sudo make install
+    
     - name: cmake
       run: |
-        mkdir build && cd build && cmake ..
+        mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release
+    
     - name: make
       run: make
       working-directory: ./build

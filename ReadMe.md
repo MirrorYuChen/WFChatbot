@@ -66,9 +66,6 @@ WFChatbot/
 
 ```bash
 # 1.安装workflow
-## 1.1 ubuntu 22.04可直接apt安装
->> sudo apt-get -y install libworkflow-dev
-## 1.2 源码安装
 >> git clone https://github.com/sogou/workflow
 >> cd workflow && make && sudo make install && sudo ldconfig
 
