@@ -14,15 +14,15 @@ ToolBase::ToolBase() {}
 
 Json ToolBase::getFunctionDef() const {
   Json def = Json::Object{};
-  def["name"] = name();
-  def["description"] = description();
+  def.push_back("name", name());
+  def.push_back("description", description());
 
   Json params = parameters();
   if (params.is_null() || params.size() == 0) {
     // Default empty parameters
-    def["parameters"] = Json::Object{{"type", "object"},
+    def.push_back("parameters", Json::Object{{"type", "object"},
                                      {"properties", Json::Object{}},
-                                     {"required", Json::Array{}}};
+                                     {"required", Json::Array{}}});
   } else if (params.is_array()) {
     // Convert array format to JSON schema
     Json properties = Json::Object{};
@@ -31,23 +31,23 @@ Json ToolBase::getFunctionDef() const {
       const Json &param = params[i];
       Json prop = Json::Object{};
       if (param.has("type")) {
-        prop["type"] = param["type"];
+        prop.push_back("type", param["type"]);
       } else {
-        prop["type"] = "string";
+        prop.push_back("type", "string");
       }
       if (param.has("description")) {
-        prop["description"] = param["description"];
+        prop.push_back("description", param["description"]);
       }
-      properties[param["name"].get<std::string>()] = prop;
+      properties.push_back(param["name"].get<std::string>(), prop);
 
       if (param.has("required") && static_cast<bool>(param["required"])) {
         required.push_back(param["name"]);
       }
     }
-    def["parameters"] = Json::Object{
-        {"type", "object"}, {"properties", properties}, {"required", required}};
+    def.push_back("parameters", Json::Object{
+        {"type", "object"}, {"properties", properties}, {"required", required}});
   } else {
-    def["parameters"] = params;
+    def.push_back("parameters", params);
   }
 
   return def;

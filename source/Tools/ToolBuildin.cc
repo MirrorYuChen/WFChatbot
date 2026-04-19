@@ -16,10 +16,10 @@ std::string ToolWebSearch::description() const {
 Json ToolWebSearch::parameters() const {
   Json params = Json::Array{};
   Json query_param = Json::Object{};
-  query_param["name"] = "query";
-  query_param["type"] = "string";
-  query_param["description"] = "The search query";
-  query_param["required"] = true;
+  query_param.push_back("name", "query");
+  query_param.push_back("type", "string");
+  query_param.push_back("description", "The search query");
+  query_param.push_back("required", true);
   params.push_back(query_param);
   return params;
 }
@@ -33,9 +33,9 @@ ToolResult ToolWebSearch::Call(const std::string &params,
   std::string query = static_cast<std::string>(p["query"]);
   // Placeholder - in production would call actual search API
   Json result = Json::Object{};
-  result["query"] = query;
-  result["results"] = Json::Array{};
-  result["message"] = "Web search not yet implemented. Return query for now.";
+  result.push_back("query", query);
+  result.push_back("results", Json::Array{});
+  result.push_back("message", "Web search not yet implemented. Return query for now.");
   return ToolResult(result.dump());
 }
 
@@ -53,7 +53,7 @@ ToolResult ToolCurrentTime::Call(const std::string &params,
   char buffer[128];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", tm_info);
   Json result = Json::Object{};
-  result["datetime"] = std::string(buffer);
+  result.push_back("datetime", std::string(buffer));
   return ToolResult(result.dump());
 }
 
@@ -65,10 +65,10 @@ std::string ToolCalculator::description() const {
 Json ToolCalculator::parameters() const {
   Json params = Json::Array{};
   Json expr_param = Json::Object{};
-  expr_param["name"] = "expression";
-  expr_param["type"] = "string";
-  expr_param["description"] = "The mathematical expression to evaluate";
-  expr_param["required"] = true;
+  expr_param.push_back("name", "expression");
+  expr_param.push_back("type", "string");
+  expr_param.push_back("description", "The mathematical expression to evaluate");
+  expr_param.push_back("required", true);
   params.push_back(expr_param);
   return params;
 }
@@ -87,5 +87,9 @@ ToolResult ToolCalculator::Call(const std::string &params,
       "Calculator not yet implemented. Return expression for now.";
   return ToolResult(result.dump());
 }
+
+REGISTERTOOL("web_search", ToolWebSearch)
+REGISTERTOOL("current_time", ToolCurrentTime)
+REGISTERTOOL("calculator", ToolCalculator)
 
 NAMESPACE_END

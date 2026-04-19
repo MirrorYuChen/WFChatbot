@@ -22,30 +22,26 @@ ToolAmapWeather::ToolAmapWeather(const Json &cfg) : cfg_(cfg) {
 std::string ToolAmapWeather::name() const { return "amap_weather"; }
 
 std::string ToolAmapWeather::description() const {
-  return "Get weather information for a Chinese city using Amap (Gaode) API. "
-         "Returns current weather conditions and forecast. "
-         "Supports city names (e.g., 'Beijing', 'Shanghai', 'Guangzhou') or "
-         "city adcode.";
+  return "获取对应城市的天气数据";
 }
 
 Json ToolAmapWeather::parameters() const {
   Json params = Json::Array{};
 
   Json city_param = Json::Object{};
-  city_param["name"] = "city";
-  city_param["type"] = "string";
-  city_param["description"] = "City name (Chinese or English) or city adcode "
-                              "(e.g., 'Beijing', 'Shanghai', '110000')";
-  city_param["required"] = true;
+  city_param.push_back("name", "city");
+  city_param.push_back("type", "string");
+  city_param.push_back("description", "城市/区具体名称，如`北京市海淀区`请描述为`海淀区`，务必以市或区结尾");
+  city_param.push_back("required", true);
   params.push_back(city_param);
 
   Json extensions_param = Json::Object{};
-  extensions_param["name"] = "extensions";
-  extensions_param["type"] = "string";
-  extensions_param["description"] =
-      "Weather data type: 'base' for current weather, 'all' for weather "
-      "forecast. Default is 'base'.";
-  extensions_param["required"] = false;
+  extensions_param.push_back("name", "extensions");
+  extensions_param.push_back("type", "string");
+  extensions_param.push_back("description",
+                             "Weather data type: 'base' for current weather, "
+                             "'all' for weather forecast. Default is 'base'.");
+  extensions_param.push_back("required", false);
   params.push_back(extensions_param);
 
   return params;
@@ -77,10 +73,8 @@ ToolResult ToolAmapWeather::Call(const std::string &params,
   }
   FormatInfo("Tool call] city='{}', extensions='{}', api_key='{}'", city,
              extensions, api_key_);
-
-  std::string normalized_city = NormalizeCity(city);
-  std::string url = BuildUrl(normalized_city, extensions);
-  FormatInfo("normalized='{}', url='{}'", normalized_city, url);
+  std::string url = BuildUrl(city, extensions);
+  FormatInfo("normalized='{}', url='{}'", city, url);
 
   std::string response;
 
@@ -151,30 +145,6 @@ ToolResult ToolAmapWeather::Call(const std::string &params,
 
   Json output = FormatWeatherResult(api_result, extensions);
   return ToolResult(output.dump());
-}
-
-std::string ToolAmapWeather::NormalizeCity(const std::string &city) {
-  static std::map<std::string, std::string> city_map = {
-      {"Beijing", "北京"},  {"Shanghai", "上海"}, {"Guangzhou", "广州"},
-      {"Shenzhen", "深圳"}, {"Hangzhou", "杭州"}, {"Nanjing", "南京"},
-      {"Chengdu", "成都"},  {"Wuhan", "武汉"},    {"Xi'an", "西安"},
-      {"Xian", "西安"},     {"Tianjin", "天津"},  {"Chongqing", "重庆"},
-      {"Harbin", "哈尔滨"}, {"Dalian", "大连"},   {"Qingdao", "青岛"},
-      {"Suzhou", "苏州"},   {"Kunming", "昆明"},  {"Fuzhou", "福州"},
-      {"Xiamen", "厦门"},   {"Zhengzhou", "郑州"}};
-
-  auto it = city_map.find(city);
-  if (it != city_map.end()) {
-    return it->second;
-  }
-
-  for (char c : city) {
-    if (static_cast<unsigned char>(c) > 127) {
-      return city;
-    }
-  }
-
-  return city;
 }
 
 std::string ToolAmapWeather::BuildUrl(const std::string &city,

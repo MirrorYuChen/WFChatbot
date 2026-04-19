@@ -62,8 +62,4 @@ public:
 private:
   Json cfg_;
 };
-
-REGISTERTOOL("web_search", ToolWebSearch)
-REGISTERTOOL("current_time", ToolCurrentTime)
-REGISTERTOOL("calculator", ToolCalculator)
 NAMESPACE_END
