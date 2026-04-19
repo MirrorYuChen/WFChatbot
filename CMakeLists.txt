@@ -39,7 +39,7 @@ list(APPEND LIBRARIES_TO_LINK Threads::Threads)
 
 find_library(LIBRT rt)
 find_package(OpenSSL REQUIRED)
-find_package(workflow REQUIRED CONFIG HINTS ..)
+find_package(workflow REQUIRED)
 find_path(HIREDIS_HEADER hiredis/hiredis.h)
 find_library(HIREDIS_LIB hiredis)
 find_package(ZLIB REQUIRED)

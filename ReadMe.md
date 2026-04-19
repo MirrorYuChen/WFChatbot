@@ -67,15 +67,22 @@ WFChatbot/
 ```bash
 # 1.安装workflow
 ## 1.1 ubuntu 22.04可直接apt安装
->> sudo apt-get install libworkflow-dev
+>> sudo apt-get -y install libworkflow-dev
 ## 1.2 源码安装
 >> git clone https://github.com/sogou/workflow
->> cd workflow && make && sudo make install
+>> cd workflow && make && sudo make install && sudo ldconfig
 
-# 2.创建构建目录
+# 2.安装hiredis
+## 2.1 apt安装
+>> sudo apt-get -y install libhiredis-dev
+## 2.2 源码安装
+>> git clone https://github.com/redis/hiredis.git 
+>> cd hiredis && make -j 16 && make install && sudo ldconfig
+
+# 3.创建构建目录
 >> mkdir build && cd build
 
-# 3.配置并编译
+# 4.配置并编译
 >> cmake .. && make -j4
 ```
 
