@@ -43,6 +43,7 @@ int main(int argc, char *argv[]) {
   }
   cfg.llm_api_base = "https://api.deepseek.com/v1";
   cfg.tools.push_back("amap_weather");
+  cfg.tools.push_back("calculator");
   cfg.system_message =
       "You are a helpful AI assistant with access to various tools.";
 
