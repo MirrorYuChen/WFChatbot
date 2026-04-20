@@ -5,6 +5,7 @@
  * @Description: ExampleChatbot
  */
 #include "Server/ChatbotServer.h"
+#include "Tools/ToolMCP.h"
 #include <workflow/WFFacilities.h>
 
 #include <csignal>
@@ -44,8 +45,27 @@ int main(int argc, char *argv[]) {
   cfg.llm_api_base = "https://api.deepseek.com/v1";
   cfg.tools.push_back("amap_weather");
   cfg.tools.push_back("calculator");
+
+  // Initialize MCP SQLite
+  if (MCPManager::instance().AddServer("sqlite", "mcp-server-sqlite", {"--db-path", "chatbot.db"})) {
+    // These names are based on standard server-sqlite tools (read_query, write_query, list_tables, describe_table)
+    cfg.tools.push_back("mcp_sqlite_read_query");
+    cfg.tools.push_back("mcp_sqlite_write_query");
+    cfg.tools.push_back("mcp_sqlite_create_table");
+    cfg.tools.push_back("mcp_sqlite_list_tables");
+  }
+
   cfg.system_message =
       "You are a helpful AI assistant with access to various tools.";
+
+  // List all tools currently in registry for debugging
+  std::cerr << "Registry Tools: ";
+  auto registry_tools = ToolRegistry::instance().ListTools();
+  for (size_t i = 0; i < registry_tools.size(); i++) {
+    if (i > 0) std::cerr << ", ";
+    std::cerr << registry_tools[i];
+  }
+  std::cerr << "\n";
 
   g_server.reset(new ChatbotServer(cfg));
 
@@ -60,7 +80,7 @@ int main(int argc, char *argv[]) {
     wait_group.wait();
   } else {
     fprintf(stderr, "Cannot start server\n");
-    exit(1);
+    return 1;
   }
   return 0;
 }

@@ -99,7 +99,10 @@ export DASHSCOPE_API_KEY=your_api_key
   -v redis-data:/data \
   redis redis-server --appendonly yes
 
-# 3.运行示例
+# 3.安装mcp-server-sqlite
+>> pip install mcp-server-sqlite
+
+# 4.运行示例
 >> ./build/examples/ExampleChatbot
 ```
 
