@@ -93,10 +93,15 @@ void Agent::AddTool(ToolBase *tool) {
 std::vector<FunctionDef> Agent::getFunctionDefs() const {
   std::vector<FunctionDef> defs;
   for (const auto &pair : tools_) {
+    Json full_def = pair.second->getFunctionDef();
     FunctionDef def;
-    def.name = pair.second->name();
-    def.description = pair.second->description();
-    def.parameters = pair.second->parameters();
+    def.name = static_cast<std::string>(full_def["name"]);
+    if (full_def.has("description")) {
+      def.description = static_cast<std::string>(full_def["description"]);
+    }
+    if (full_def.has("parameters")) {
+      def.parameters = full_def["parameters"];
+    }
     defs.push_back(def);
   }
   return defs;
@@ -166,25 +171,43 @@ std::string Agent::DetectLanguage(const std::vector<Message> &messages) const {
 
 std::vector<Message>
 Agent::PrependSystemMessage(const std::vector<Message> &messages) const {
-  if (system_message_.empty()) {
-    return messages;
-  }
-
   std::vector<Message> result;
-  if (messages.empty() || messages[0].role != ROLE_SYSTEM) {
-    result.emplace_back(ROLE_SYSTEM, system_message_);
-  } else {
+  std::string date_prefix = "今天是" + getCurrentDate() + "。\n\n";
+
+  // 1. Handle system message
+  bool has_system = false;
+  if (!messages.empty() && messages[0].role == ROLE_SYSTEM) {
+    has_system = true;
     Message sys_msg = messages[0];
-    result.emplace_back(std::move(sys_msg));
+    if (!system_message_.empty() && sys_msg.content.find(system_message_) == std::string::npos) {
+        sys_msg.content = system_message_ + "\n" + sys_msg.content;
+    }
+    // Add date to system message or first user message? 
+    // Let's keep system message clean and add to first user message.
+    result.push_back(std::move(sys_msg));
+  } else if (!system_message_.empty()) {
+    result.push_back(Message(ROLE_SYSTEM, system_message_));
   }
 
-  for (size_t i = (messages.empty() || messages[0].role != ROLE_SYSTEM) ? 0 : 1;
-       i < messages.size() - 1; ++i) {
-    result.emplace_back(messages[i]);
+  // 2. Add remaining messages and inject date into the FIRST user message
+  bool date_injected = false;
+  size_t start_idx = has_system ? 1 : 0;
+  
+  for (size_t i = start_idx; i < messages.size(); ++i) {
+    Message msg = messages[i];
+    if (!date_injected && msg.role == ROLE_USER) {
+      if (msg.content.find(date_prefix) == std::string::npos) {
+        msg.content = date_prefix + msg.content;
+      }
+      date_injected = true;
+    }
+    result.push_back(std::move(msg));
   }
-  Message user_msg = messages[messages.size() - 1];
-  user_msg.content = "今天是" + getCurrentDate() + "。\n\n" + user_msg.content;
-  result.emplace_back(std::move(user_msg));
+
+  // If no user message found and date not injected, maybe append to system message if it exists
+  if (!date_injected && !result.empty() && result[0].role == ROLE_SYSTEM) {
+      result[0].content = date_prefix + result[0].content;
+  }
 
   return result;
 }
@@ -235,97 +258,104 @@ void Assistant::_Run(const std::vector<Message> &messages,
                      AgentCompleteCallback complete_cb,
                      AgentErrorCallback error_cb) {
 
-  // Get function definitions for tool calling
-  std::vector<FunctionDef> function_defs = getFunctionDefs();
+  struct RunContext {
+    std::vector<Message> history;
+    Message accumulated;
+    int call_count = 0;
+    bool done = false;
+    std::vector<FunctionDef> function_defs;
+    AgentStreamCallback stream_cb;
+    AgentCompleteCallback complete_cb;
+    AgentErrorCallback error_cb;
+    std::function<void(const std::vector<Message> &)> do_llm_call;
 
-  // Simple implementation: single LLM call, handle tool calls if any
-  Message *accumulated = new Message(ROLE_ASSISTANT, "");
-  std::vector<Message> *history = new std::vector<Message>(messages);
-  int *call_count = new int(0);
-  bool *done = new bool(false);
+    RunContext(const std::vector<Message> &msgs,
+               std::vector<FunctionDef> &&defs, AgentStreamCallback s,
+               AgentCompleteCallback c, AgentErrorCallback e)
+        : history(msgs), accumulated(ROLE_ASSISTANT, ""),
+          function_defs(std::move(defs)), stream_cb(s), complete_cb(c),
+          error_cb(e) {}
+  };
 
-  // Define the recursive LLM call handler
-  std::function<void(const std::vector<Message> &)> DoLLMCall =
-      [this, &DoLLMCall, history, accumulated, call_count, done, function_defs,
-       stream_cb, complete_cb, error_cb](const std::vector<Message> &msgs) {
-        if (*done)
-          return;
-        (*call_count)++;
+  auto ctx = std::make_shared<RunContext>(messages, getFunctionDefs(),
+                                         stream_cb, complete_cb, error_cb);
 
-        if (*call_count > max_llm_calls_per_run_) {
-          *done = true;
-          if (complete_cb) {
-            complete_cb({*accumulated});
+  ctx->do_llm_call = [this, ctx](const std::vector<Message> &msgs) {
+    if (ctx->done)
+      return;
+    ctx->call_count++;
+
+    if (ctx->call_count > max_llm_calls_per_run_) {
+      ctx->done = true;
+      if (ctx->complete_cb) {
+        ctx->complete_cb({ctx->accumulated});
+      }
+      ctx->do_llm_call = nullptr; // Break cycle
+      return;
+    }
+
+    CallLLM(
+        msgs, ctx->function_defs, true,
+        [ctx](const std::vector<Message> &chunk) {
+          if (!chunk.empty()) {
+            ctx->accumulated.content += chunk.back().content;
+            ctx->accumulated.reasoning_content += chunk.back().reasoning_content;
           }
-          delete accumulated;
-          delete history;
-          delete call_count;
-          delete done;
-          return;
-        }
+          if (ctx->stream_cb) {
+            ctx->stream_cb({ctx->accumulated});
+          }
+        },
+        [this, ctx](const std::vector<Message> &response) {
+          if (ctx->done)
+            return;
 
-        CallLLM(
-            msgs, function_defs, true,
-            [accumulated, stream_cb](const std::vector<Message> &chunk) {
-              if (!chunk.empty()) {
-                accumulated->content = chunk.back().content;
-                accumulated->reasoning_content = chunk.back().reasoning_content;
+          if (!response.empty()) {
+            const Message &resp_info = response.back();
+            bool tool_triggered = false;
+
+            if (resp_info.HasToolCalls()) {
+              ctx->history.push_back(resp_info);
+              for (const auto &tc : resp_info.tool_calls) {
+                ToolResult result = CallTool(tc.function.name, tc.function.arguments);
+                std::string result_text = result.success ? result.text : result.error;
+                Message tool_msg(ROLE_TOOL, result_text);
+                tool_msg.tool_call_id = tc.id;
+                ctx->history.push_back(tool_msg);
+                tool_triggered = true;
               }
-              if (stream_cb) {
-                stream_cb({*accumulated});
-              }
-            },
-            [this, accumulated, history, call_count, done, function_defs,
-             stream_cb, complete_cb, error_cb,
-             &DoLLMCall](const std::vector<Message> &response) {
-              if (*done)
-                return;
+            } else if (resp_info.HasFunctionCall()) {
+              ctx->history.push_back(resp_info);
+              ToolResult result = CallTool(resp_info.function_call.name, resp_info.function_call.arguments);
+              std::string result_text = result.success ? result.text : result.error;
+              Message tool_msg(ROLE_TOOL, result_text);
+              tool_msg.tool_call_id = "fc_" + resp_info.function_call.name;
+              ctx->history.push_back(tool_msg);
+              tool_triggered = true;
+            }
 
-              if (!response.empty()) {
-                *accumulated = response.back();
-                std::string tool_name, tool_args;
-                if (DetectToolCall(*accumulated, tool_name, tool_args)) {
-                  // Execute tool
-                  ToolResult result = CallTool(tool_name, tool_args);
+            if (tool_triggered) {
+              ctx->accumulated = Message(ROLE_ASSISTANT, "");
+              ctx->do_llm_call(ctx->history);
+              return;
+            }
+          }
 
-                  // Add assistant message and tool result to history
-                  history->push_back(*accumulated);
-                  Message tool_msg(ROLE_FUNCTION, result.text);
-                  tool_msg.name = tool_name;
-                  history->push_back(tool_msg);
+          ctx->done = true;
+          if (ctx->complete_cb) {
+            ctx->complete_cb({ctx->accumulated});
+          }
+          ctx->do_llm_call = nullptr; // Break cycle
+        },
+        [ctx](int code, const std::string &msg) {
+          ctx->done = true;
+          if (ctx->error_cb) {
+            ctx->error_cb(code, msg);
+          }
+          ctx->do_llm_call = nullptr; // Break cycle
+        });
+  };
 
-                  // Reset accumulated for next LLM call
-                  *accumulated = Message(ROLE_ASSISTANT, "");
-
-                  // Recurse
-                  DoLLMCall(*history);
-                  return;
-                }
-              }
-
-              *done = true;
-              if (complete_cb) {
-                complete_cb({*accumulated});
-              }
-              delete accumulated;
-              delete history;
-              delete call_count;
-              delete done;
-            },
-            [error_cb, accumulated, history, call_count,
-             done](int code, const std::string &msg) {
-              *done = true;
-              if (error_cb) {
-                error_cb(code, msg);
-              }
-              delete accumulated;
-              delete history;
-              delete call_count;
-              delete done;
-            });
-      };
-
-  DoLLMCall(messages);
+  ctx->do_llm_call(ctx->history);
 }
 
 NAMESPACE_END

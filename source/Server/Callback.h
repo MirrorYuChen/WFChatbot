@@ -27,6 +27,8 @@ struct ChatContext {
   std::string redis_url;
   std::string model;
   Agent *agent;
+  size_t last_sent_len = 0;
+  size_t last_reasoning_sent_len = 0;
 };
 
 API void HelloWorld(WFHttpTask *task);

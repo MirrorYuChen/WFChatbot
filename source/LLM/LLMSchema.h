@@ -36,7 +36,7 @@ inline API std::string getCurrentDate() {
 
 // Default system message
 inline API const std::string DEFAULT_SYSTEM_MESSAGE =
-    "You are a helpful assistant. "
+    "You are a helpful AI assistant. When using tools, summarize the results clearly and naturally for the user. Avoid providing only punctuation or single words."
     "When responding, use the following guidelines:\n"
     "- Be accurate and helpful.\n"
     "- Provide clear and concise responses.\n"
@@ -116,6 +116,13 @@ struct API FunctionCall {
     }
     return fc;
   }
+
+  void Merge(const FunctionCall &delta) {
+    if (!delta.name.empty()) {
+      name = delta.name;
+    }
+    arguments += delta.arguments;
+  }
 };
 
 // Tool call structure
@@ -126,9 +133,9 @@ struct API ToolCall {
 
   Json ToJson() const {
     Json j = Json::Object{};
-    j["id"] = id;
-    j["type"] = type;
-    j["function"] = function.ToJson();
+    j.push_back("id", id);
+    j.push_back("type", type);
+    j.push_back("function", function.ToJson());
     return j;
   }
 
@@ -145,6 +152,16 @@ struct API ToolCall {
     }
     return tc;
   }
+
+  void Merge(const ToolCall &delta) {
+    if (!delta.id.empty()) {
+      id = delta.id;
+    }
+    if (!delta.type.empty()) {
+      type = delta.type;
+    }
+    function.Merge(delta.function);
+  }
 };
 
 // Message structure mirroring Qwen-Agent's Message schema
@@ -155,6 +172,7 @@ struct API Message {
   std::string name;
   FunctionCall function_call;
   std::vector<ToolCall> tool_calls;
+  std::string tool_call_id;
   Json extra; // Extra metadata
 
   Message() = default;
@@ -187,7 +205,7 @@ struct API Message {
       j["name"] = name;
     }
     if (HasFunctionCall()) {
-      j["function_call"] = function_call.ToJson();
+      j.push_back("function_call", function_call.ToJson());
     }
     if (HasToolCalls()) {
       Json tc_array = Json::Array{};
@@ -195,6 +213,9 @@ struct API Message {
         tc_array.push_back(tc.ToJson());
       }
       j["tool_calls"] = tc_array;
+    }
+    if (role == ROLE_TOOL && !tool_call_id.empty()) {
+      j["tool_call_id"] = tool_call_id;
     }
     if (!extra.is_null()) {
       j["extra"] = extra;
@@ -228,6 +249,9 @@ struct API Message {
       for (size_t i = 0; i < j["tool_calls"].size(); ++i) {
         msg.tool_calls.push_back(ToolCall::FromJson(j["tool_calls"][i]));
       }
+    }
+    if (j.has("tool_call_id")) {
+      msg.tool_call_id = static_cast<std::string>(j["tool_call_id"]);
     }
     if (j.has("extra")) {
       msg.extra = j["extra"].copy();

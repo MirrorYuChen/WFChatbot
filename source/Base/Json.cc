@@ -73,6 +73,14 @@ Json &Json::operator=(const Json &other) {
   if (this == &other) {
     return *this;
   }
+  if (parent_ != nullptr) {
+    if (json_value_type(parent_) == JSON_VALUE_ARRAY) {
+      update_arr(other);
+    } else if (json_value_type(parent_) == JSON_VALUE_OBJECT) {
+      push_back_obj(parent_key_, other);
+    }
+    return *this;
+  }
   destroy_node(&node_);
   node_ = json_value_copy(other.node_);
   parent_ = nullptr;

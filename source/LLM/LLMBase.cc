@@ -161,10 +161,10 @@ LLMResponse LLMBase::ParseFullResponse(const Json &json_resp) {
   LLMResponse resp;
   if (json_resp.has("choices") && json_resp["choices"].size() > 0) {
     Json message = json_resp["choices"][0]["message"];
-    if (message.has("content")) {
+    if (message.has("content") && message["content"].is_string()) {
       resp.content = static_cast<std::string>(message["content"]);
     }
-    if (message.has("reasoning_content")) {
+    if (message.has("reasoning_content") && message["reasoning_content"].is_string()) {
       resp.reasoning_content =
           static_cast<std::string>(message["reasoning_content"]);
     }
@@ -176,7 +176,7 @@ LLMResponse LLMBase::ParseFullResponse(const Json &json_resp) {
         resp.tool_calls.push_back(ToolCall::FromJson(message["tool_calls"][i]));
       }
     }
-    if (json_resp["choices"][0].has("finish_reason")) {
+    if (json_resp["choices"][0].has("finish_reason") && json_resp["choices"][0]["finish_reason"].is_string()) {
       resp.finish_reason =
           static_cast<std::string>(json_resp["choices"][0]["finish_reason"]);
       resp.is_finished = true;
@@ -199,8 +199,6 @@ std::string LLMBase::BuildRequestBody(const std::vector<Message> &messages,
     std::string role = msg.role;
     if (role.empty())
       role = ROLE_USER;
-    if (role == ROLE_TOOL)
-      role = ROLE_FUNCTION;
 
     Json msg_json = Json::Object{};
     msg_json["role"] = role;
@@ -217,6 +215,9 @@ std::string LLMBase::BuildRequestBody(const std::vector<Message> &messages,
           tc_array.push_back(tc.ToJson());
         msg_json["tool_calls"] = tc_array;
       }
+    } else if (role == ROLE_TOOL) {
+      msg_json["content"] = msg.content;
+      msg_json["tool_call_id"] = msg.tool_call_id;
     } else if (role == ROLE_FUNCTION) {
       msg_json["content"] = msg.content;
       if (!msg.name.empty())
@@ -246,7 +247,21 @@ std::string LLMBase::BuildRequestBody(const std::vector<Message> &messages,
   if (config.max_tokens > 0) {
     body += ",\"max_tokens\":" + std::to_string(config.max_tokens);
   }
+
+  if (functions.is_array() && functions.size() > 0) {
+    Json tools = Json::Array{};
+    for (size_t i = 0; i < functions.size(); ++i) {
+      Json tool = Json::Object{};
+      tool.push_back("type", "function");
+      tool.push_back("function", functions[i]);
+      tools.push_back(tool);
+    }
+    body += ",\"tools\":" + tools.dump();
+  }
+
   body += "}";
+
+  FormatInfo("Request body: {}", body);
 
   return body;
 }
@@ -419,7 +434,27 @@ void LLMBase::ProcessSseChunk(const void *data, size_t size,
         msg.reasoning_content = ctx->reasoning_content;
       }
 
-      if (ctx->stream_cb && !delta_content.empty()) {
+      if (delta.has("tool_calls") && delta["tool_calls"].is_array()) {
+        for (size_t i = 0; i < delta["tool_calls"].size(); ++i) {
+          Json tc_delta_json = delta["tool_calls"][i];
+          int idx = 0;
+          if (tc_delta_json.has("index")) {
+            idx = static_cast<int>(tc_delta_json["index"]);
+          }
+          
+          ToolCall tc_delta = ToolCall::FromJson(tc_delta_json);
+          
+          // Accumulate/Merge tool calls
+          if (idx >= (int)ctx->accumulated_tool_calls.size()) {
+            ctx->accumulated_tool_calls.resize(idx + 1);
+          }
+          ctx->accumulated_tool_calls[idx].Merge(tc_delta);
+          
+          msg.tool_calls.push_back(tc_delta);
+        }
+      }
+
+      if (ctx->stream_cb && (!delta_content.empty() || !msg.tool_calls.empty())) {
         ctx->stream_cb({msg});
       }
     }
@@ -443,6 +478,7 @@ void LLMBase::HandleStreamComplete(WFHttpChunkedTask *task,
   if (!ctx->reasoning_content.empty()) {
     final_msg.reasoning_content = ctx->reasoning_content;
   }
+  final_msg.tool_calls = ctx->accumulated_tool_calls;
   ctx->messages->push_back(final_msg);
 
   std::vector<Message> assistant_msgs;
@@ -453,6 +489,7 @@ void LLMBase::HandleStreamComplete(WFHttpChunkedTask *task,
   }
 
   if (ctx->complete_cb) {
+    FormatInfo("Final assistant response: {}", final_msg.content);
     ctx->complete_cb(assistant_msgs);
   }
 }

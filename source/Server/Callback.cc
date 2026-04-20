@@ -138,8 +138,8 @@ void getHealth(WFHttpTask *task) {
     resp->add_header_pair("Server", "Server Implemented by Workflow.");
 
     Json j = Json::Object{};
-    j["status"] = "ok";
-    j["service"] = "chatbot";
+    j.push_back("status", "ok");
+    j.push_back("service", "chatbot");
     auto tools = ToolRegistry::instance().ListTools();
     Json tools_arr = Json::Array{};
     for (const auto &tool_name : tools) {
@@ -180,9 +180,9 @@ void getModels(WFHttpTask *task) {
     j["data"].push_back(model_qwen_turbo);
 
     Json model_qwen_plus = Json::Object{};
-    model_qwen_plus["id"] = "qwen-plus";
-    model_qwen_plus["object"] = "model";
-    model_qwen_plus["owned_by"] = "alibaba";
+    model_qwen_plus.push_back("id", "qwen-plus");
+    model_qwen_plus.push_back("object", "model");
+    model_qwen_plus.push_back("owned_by", "alibaba");
     j["data"].push_back(model_qwen_plus);
 
     resp->append_output_body_nocopy(j.dump());
@@ -249,9 +249,13 @@ void ChatCompletions(WFHttpTask *task, Agent *agent,
       }
       if (!user_id_param.empty() && !message_param.empty()) {
         body = Json::Object{};
-        body["user_id"] = user_id_param;
-        body["messages"] = Json::Array{
-            Json::Object{{"role", "user"}, {"content", message_param}}};
+        body.push_back("user_id", user_id_param);
+        Json msgs = Json::Array{};
+        Json user_msg = Json::Object{};
+        user_msg.push_back("role", "user");
+        user_msg.push_back("content", message_param);
+        msgs.push_back(user_msg);
+        body.push_back("messages", msgs);
         has_valid_input = true;
       }
     }
@@ -355,16 +359,49 @@ void ChatCompletions(WFHttpTask *task, Agent *agent,
               messages,
               [ctx](const std::vector<Message> &chunk) {
                 if (!chunk.empty()) {
-                  std::string content = chunk.back().content;
-                  Json chunk_json = Json::Object{};
-                  chunk_json["id"] = "chatcmpl-agent";
-                  chunk_json["object"] = "chat.completion.chunk";
-                  chunk_json["model"] = ctx->model;
-                  chunk_json["choices"] = Json::Array{Json::Object{
-                      {"delta", Json::Object{{"content", content}}},
-                      {"index", 0}}};
-                  std::string data = "data: " + chunk_json.dump() + "\n\n";
-                  SendStreamChunkPush(ctx->http_task, data);
+                  const Message &msg = chunk.back();
+                  Json delta_obj = Json::Object{};
+                  bool has_delta = false;
+
+                  // Detect reset (new turn)
+                  if (msg.content.size() < ctx->last_sent_len) {
+                    ctx->last_sent_len = 0;
+                  }
+                  if (msg.reasoning_content.size() <
+                      ctx->last_reasoning_sent_len) {
+                    ctx->last_reasoning_sent_len = 0;
+                  }
+
+                  // Handle content delta
+                  if (msg.content.size() > ctx->last_sent_len) {
+                    delta_obj["content"] =
+                        msg.content.substr(ctx->last_sent_len);
+                    ctx->last_sent_len = msg.content.size();
+                    has_delta = true;
+                  }
+
+                  // Handle reasoning_content delta
+                  if (msg.reasoning_content.size() >
+                      ctx->last_reasoning_sent_len) {
+                    delta_obj["reasoning_content"] = msg.reasoning_content.substr(
+                        ctx->last_reasoning_sent_len);
+                    ctx->last_reasoning_sent_len =
+                        msg.reasoning_content.size();
+                    has_delta = true;
+                  }
+
+                  if (has_delta) {
+                    Json chunk_json = Json::Object{};
+                    chunk_json["id"] = "chatcmpl-agent";
+                    chunk_json["object"] = "chat.completion.chunk";
+                    chunk_json["model"] = ctx->model;
+                    chunk_json["choices"] =
+                        Json::Array{Json::Object{{"delta", delta_obj},
+                                                 {"index", 0},
+                                                 {"finish_reason", nullptr}}};
+                    std::string data = "data: " + chunk_json.dump() + "\n\n";
+                    SendStreamChunkPush(ctx->http_task, data);
+                  }
                 }
               },
               [ctx, wg, local_redis_url](const std::vector<Message> &response) {

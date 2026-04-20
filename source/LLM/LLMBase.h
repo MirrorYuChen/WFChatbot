@@ -62,6 +62,7 @@ struct LLMStreamContext {
   std::string http_body;
   std::string accumulated_content;
   std::string reasoning_content;
+  std::vector<ToolCall> accumulated_tool_calls;
   std::string sse_buffer;
 };
 

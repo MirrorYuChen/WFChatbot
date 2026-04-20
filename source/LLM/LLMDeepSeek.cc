@@ -101,19 +101,22 @@ void LLMDeepSeek::HttpCallback(WFHttpTask *task, LLMStreamCallback stream_cb,
   size_t input_msg_count = messages->size();
 
   Json json_resp = Json::parse(body_str);
-  if (json_resp.is_valid() && json_resp.has("choices") &&
-      json_resp["choices"].size() > 0) {
-    Json msg_json = json_resp["choices"][0]["message"];
-    std::string content = msg_json.has("content")
-                              ? static_cast<std::string>(msg_json["content"])
-                              : "";
-    Message final_msg(ROLE_ASSISTANT, content);
-
-    if (msg_json.has("reasoning_content")) {
-      final_msg.reasoning_content =
-          static_cast<std::string>(msg_json["reasoning_content"]);
+  if (json_resp.is_valid()) {
+    LLMResponse resp_info = ParseFullResponse(json_resp);
+    if (resp_info.is_finished || !resp_info.content.empty() ||
+        !resp_info.tool_calls.empty() || !resp_info.function_call.name.empty()) {
+      Message final_msg(ROLE_ASSISTANT, resp_info.content);
+      if (!resp_info.reasoning_content.empty()) {
+        final_msg.reasoning_content = resp_info.reasoning_content;
+      }
+      if (!resp_info.tool_calls.empty()) {
+        final_msg.tool_calls = resp_info.tool_calls;
+      }
+      if (!resp_info.function_call.name.empty()) {
+        final_msg.function_call = resp_info.function_call;
+      }
+      messages->push_back(final_msg);
     }
-    messages->push_back(final_msg);
   }
   FormatInfo("After parse: input_count={}, total={}", input_msg_count, messages->size());
 

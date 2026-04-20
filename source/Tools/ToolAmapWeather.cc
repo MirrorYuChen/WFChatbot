@@ -161,9 +161,20 @@ Json ToolAmapWeather::FormatWeatherResult(const Json &api_result,
                                           const std::string &extensions) {
   Json output = Json::Object{};
   output.push_back("status", "success");
-  output.push_back("city", api_result.has("city")
-                               ? api_result["city"].get<std::string>()
-                               : "");
+  std::string city_name = "";
+  if (extensions == "base") {
+    if (api_result.has("lives") && api_result["lives"].size() > 0) {
+      city_name = api_result["lives"][0].has("city") ? 
+                  static_cast<std::string>(api_result["lives"][0]["city"]) : "";
+    }
+  } else {
+    if (api_result.has("forecasts") && api_result["forecasts"].size() > 0) {
+      city_name = api_result["forecasts"][0].has("city") ? 
+                  static_cast<std::string>(api_result["forecasts"][0]["city"]) : "";
+    }
+  }
+  
+  output.push_back("city", city_name);
 
   if (extensions == "base") {
     if (api_result.has("lives") && api_result["lives"].is_array() &&
