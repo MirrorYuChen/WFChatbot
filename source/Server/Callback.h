@@ -31,6 +31,12 @@ struct ChatContext {
   size_t last_reasoning_sent_len = 0;
 };
 
+struct PushChunkData {
+  std::string data;
+  size_t nleft = 0;
+  WFHttpTask *http_task = nullptr;
+};
+
 API void HelloWorld(WFHttpTask *task);
 API void getHealth(WFHttpTask *task);
 API void getModels(WFHttpTask *task);

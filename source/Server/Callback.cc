@@ -9,6 +9,7 @@
 #include "Agent/Agent.h"
 #include "LLM/LLMSchema.h"
 
+#include <cerrno>
 #include <sstream>
 #include <string>
 #include <workflow/HttpMessage.h>
@@ -40,6 +41,54 @@ static void SendStreamHeader(protocol::HttpResponse *resp) {
   resp->add_header_pair("Server", "CodeBlocks ChatBot");
 }
 
+static void push_retry_callback(WFTimerTask *timer_task) {
+  auto *push_chunk_data = static_cast<PushChunkData *>(timer_task->user_data);
+  auto *http_task = push_chunk_data->http_task;
+  size_t nleft = push_chunk_data->nleft;
+  size_t pos = push_chunk_data->data.size() - nleft;
+  size_t nwritten = http_task->push(push_chunk_data->data.c_str() + pos, nleft);
+  if (nwritten >= 0) {
+    nleft = nleft - nwritten;
+  } else {
+    nwritten = 0;
+    if (errno != EWOULDBLOCK && errno != EAGAIN) {
+      delete push_chunk_data;
+      return;
+    }
+  }
+  if (nleft > 0) {
+    push_chunk_data->nleft = nleft;
+    timer_task = WFTaskFactory::create_timer_task(0, 1000000, push_retry_callback);
+    timer_task->user_data = push_chunk_data;
+    series_of(http_task)->push_front(timer_task);
+  } else {
+    delete push_chunk_data;
+  }
+}
+
+static void PushWithRetry(WFHttpTask *task, const std::string &data) {
+  size_t nleft = data.size();
+  size_t nwritten = task->push(data.c_str(), data.size());
+  if (nwritten >= 0) {
+    nleft = nleft - nwritten;
+  } else {
+    nwritten = 0;
+    if (errno != EWOULDBLOCK && errno != EAGAIN) {
+      return;
+    }
+  }
+  if (nleft > 0) {
+    auto *push_chunk_data = new PushChunkData;
+    push_chunk_data->data = data;
+    push_chunk_data->nleft = nleft;
+    push_chunk_data->http_task = task;
+    auto *timer_task =
+        WFTaskFactory::create_timer_task(0, 1000000, push_retry_callback);
+    timer_task->user_data = push_chunk_data;
+    series_of(task)->push_front(timer_task);
+  }
+}
+
 static void SendStreamHeaderPush(WFHttpTask *task) {
   std::string header = "HTTP/1.1 200 OK\r\n";
   header += "Content-Type: text/event-stream\r\n";
@@ -48,7 +97,7 @@ static void SendStreamHeaderPush(WFHttpTask *task) {
   header += "Transfer-Encoding: chunked\r\n";
   header += "Server: CodeBlocks ChatBot\r\n";
   header += "\r\n";
-  task->push(header.c_str(), header.size());
+  PushWithRetry(task, header);
 }
 
 static std::string MakeChunkData(const std::string &data) {
@@ -70,7 +119,7 @@ static void SendStreamChunkPush(WFHttpTask *task, const std::string &data) {
   if (data.empty())
     return;
   std::string chunked = MakeChunkData(data);
-  task->push(chunked.c_str(), chunked.size());
+  PushWithRetry(task, chunked);
 }
 
 static void SendStreamEnd(protocol::HttpResponse *resp) {
@@ -78,7 +127,7 @@ static void SendStreamEnd(protocol::HttpResponse *resp) {
 }
 
 static void SendStreamEndPush(WFHttpTask *task) {
-  task->push("0\r\n\r\n", 5);
+  PushWithRetry(task, std::string("0\r\n\r\n", 5));
 }
 
 static std::string EscapeJsonString(const std::string &str) {

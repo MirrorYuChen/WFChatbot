@@ -166,7 +166,11 @@ curl -X POST http://localhost:8888/v1/chat/completions \
 | DEEPSEEK_API_KEY | DeepSeek API Key |
 | DASHSCOPE_API_KEY | 阿里云 DashScope API Key |
 
-## 9.参考资料
+## 9.优化：
+
+* (1) workflow 框架的 task->push() 是非阻塞的，当 TCP 写 buffer 满时返回值小于请求写入量（或返回负值且 errno=EAGAIN），此时通过 Timer 延迟 1ms 后重试，避免数据丢失，与 wfrest 的 push_retry_callback 方案一致；
+
+## 10.参考资料
 
 - [workflow](https://github.com/sogou/workflow) - 高性能异步 HTTP 框架
 - [GitHub Actions 快速入门](https://docs.github.com/zh/actions/get-started/quickstart)
